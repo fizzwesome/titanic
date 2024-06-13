@@ -1,0 +1,159 @@
+#include <cmath>
+#include <memory>
+
+// Define a structure for the decision tree nodes
+struct TreeNode {
+    bool isLeaf;
+    int splitFeature;
+    float splitValue;
+    int prediction;
+    unique_ptr<TreeNode> left;
+    unique_ptr<TreeNode> right;
+
+    TreeNode() : isLeaf(false), splitFeature(-1), splitValue(0), prediction(0) {}
+};
+
+// Function to calculate Gini impurity
+float giniImpurity(const vector<Passenger>& data) {
+    int count[2] = {0, 0};
+    for (const auto& passenger : data) {
+        count[passenger.survived]++;
+    }
+    float p0 = count[0] / static_cast<float>(data.size());
+    float p1 = count[1] / static_cast<float>(data.size());
+    return 1.0f - p0 * p0 - p1 * p1;
+}
+
+// Function to split data
+pair<vector<Passenger>, vector<Passenger>> splitData(const vector<Passenger>& data, int feature, float value) {
+    vector<Passenger> left, right;
+    for (const auto& passenger : data) {
+        float featureValue;
+        switch (feature) {
+            case 0: featureValue = passenger.pclass; break;
+            case 1: featureValue = passenger.sex; break;
+            case 2: featureValue = passenger.age; break;
+            case 3: featureValue = passenger.fare; break;
+            case 4: featureValue = passenger.embarked; break;
+            default: featureValue = 0; break;
+        }
+        if (featureValue <= value) {
+            left.push_back(passenger);
+        } else {
+            right.push_back(passenger);
+        }
+    }
+    return {left, right};
+}
+
+// Function to train a decision tree
+unique_ptr<TreeNode> trainDecisionTree(vector<Passenger>& data, int depth = 0, int maxDepth = 5) {
+    if (data.empty()) return nullptr;
+
+    unique_ptr<TreeNode> node = make_unique<TreeNode>();
+    if (giniImpurity(data) == 0.0 || depth >= maxDepth) {
+        node->isLeaf = true;
+        int count[2] = {0, 0};
+        for (const auto& passenger : data) {
+            count[passenger.survived]++;
+        }
+        node->prediction = (count[1] > count[0]) ? 1 : 0;
+        return node;
+    }
+
+    int bestFeature = -1;
+    float bestValue = 0;
+    float bestImpurity = 1.0;
+    for (int feature = 0; feature < 5; ++feature) {
+        vector<float> values;
+        for (const auto& passenger : data) {
+            switch (feature) {
+                case 0: values.push_back(passenger.pclass); break;
+                case 1: values.push_back(passenger.sex); break;
+                case 2: values.push_back(passenger.age); break;
+                case 3: values.push_back(passenger.fare); break;
+                case 4: values.push_back(passenger.embarked); break;
+            }
+        }
+        sort(values.begin(), values.end());
+        for (size_t i = 1; i < values.size(); ++i) {
+            float splitValue = (values[i - 1] + values[i]) / 2;
+            auto [left, right] = splitData(data, feature, splitValue);
+            float impurity = (left.size() / static_cast<float>(data.size())) * giniImpurity(left) +
+                             (right.size() / static_cast<float>(data.size())) * giniImpurity(right);
+            if (impurity < bestImpurity) {
+                bestImpurity = impurity;
+                bestFeature = feature;
+                bestValue = splitValue;
+            }
+        }
+    }
+
+    if (bestFeature == -1) {
+        node->isLeaf = true;
+        int count[2] = {0, 0};
+        for (const auto& passenger : data) {
+            count[passenger.survived]++;
+        }
+        node->prediction = (count[1] > count[0]) ? 1 : 0;
+        return node;
+    }
+
+    node->splitFeature = bestFeature;
+    node->splitValue = bestValue;
+    auto [leftData, rightData] = splitData(data, bestFeature, bestValue);
+    node->left = trainDecisionTree(leftData, depth + 1, maxDepth);
+    node->right = trainDecisionTree(rightData, depth + 1, maxDepth);
+    return node;
+}
+
+// Function to make a prediction
+int predict(const TreeNode* node, const Passenger& passenger) {
+    while (!node->isLeaf) {
+        float value;
+        switch (node->splitFeature) {
+            case 0: value = passenger.pclass; break;
+            case 1: value = passenger.sex; break;
+            case 2: value = passenger.age; break;
+            case 3: value = passenger.fare; break;
+            case 4: value = passenger.embarked; break;
+            default: value = 0; break;
+        }
+        if (value <= node->splitValue) {
+            node = node->left.get();
+        } else {
+            node = node->right.get();
+        }
+    }
+    return node->prediction;
+}
+
+int main() {
+    vector<Passenger> data = loadData("path_to_titanic_dataset.csv");
+
+    // Split data into training and testing sets
+    int trainSize = static_cast<int>(data.size() * 0.8);
+    vector<Passenger> trainData(data.begin(), data.begin() + trainSize);
+    vector<Passenger> testData(data.begin() + trainSize, data.end());
+
+    // Train the decision tree
+    unique_ptr<TreeNode> tree = trainDecisionTree(trainData);
+
+    // Evaluate the model
+    int correct = 0;
+    for (const auto& passenger : testData) {
+        int prediction = predict(tree.get(), passenger);
+        if (prediction == passenger.survived) {
+            correct++;
+        }
+    }
+    float accuracy = correct / static_cast<float>(testData.size());
+    cout << "Accuracy: " << accuracy * 100 << "%" << endl;
+
+    // Example prediction
+    Passenger example = {0, 3, 1, 25, 7.25, 2};  // Pclass=3, Sex=1 (male), Age=25, Fare=7.25, Embarked=2
+    int examplePrediction = predict(tree.get(), example);
+    cout << "Example prediction: " << (examplePrediction == 1 ? "Survived" : "Not Survived") << endl;
+
+    return 0;
+}
